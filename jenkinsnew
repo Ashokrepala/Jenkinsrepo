@@ -1,0 +1,115 @@
+pipeline {
+    agent any
+    tools {
+        maven 'mvn'
+    }
+    environment {
+       Jenkins_path = "/var/lib/jenkins/workspace/DeploymentPipelines-Test/KaaS-Admin-Dashboard-Test/KaaS-Admin-Dashboard-${BUILD_NUMBER}/kaas-profile-services"
+}
+    stages {
+stage('Parameters'){
+steps {
+script {
+properties([
+parameters([
+string(name: 'ServiceBranch'),
+choice(name: 'Environment', choices: ["DEV"])
+])
+])
+}
+}
+}
+        stage('Cleaning Workspace') {
+steps {
+deleteDir()
+}
+}
+        stage('Git Clone') {
+            steps {
+   dir("KaaS-Admin-Dashboard-${BUILD_NUMBER}/")
+{
+                    git branch: "$ServiceBranch",
+                    url: 'https://github.azc.ext.hp.com/CSS-IT-Integration/kaas-profile-mgmt.git',
+                    credentialsId: 'kaas-git-credentials'
+                }
+            }
+}
+        stage("Build") {
+            steps {
+dir("KaaS-Admin-Dashboard-${BUILD_NUMBER}/")
+{
+script {
+sh '''
+mvn clean install -Dmaven.test.skip=true
+'''
+}
+}
+}    
+}
+        /*stage("SonarQube Analysis") {
+        steps {
+dir("KaaS-Admin-Dashboard-${BUILD_NUMBER}/")
+{
+withSonarQubeEnv('SonarScanner') {
+sh '''
+mvn package sonar:sonar -Dsonar.sources=src/main/java -Dsonar.java.libraries=target/* -Dsonar.java.binaries=target/classes -Dsonar.language=java -DskipTests
+'''
+}
+}
+            }
+        }*/
+        /*stage("QualityGates") {
+            steps {
+                timeout(time: 1, unit: 'HOURS') {
+                waitForQualityGate abortPipeline: true
+              }
+            }
+        }*/
+       /*stage("copy Jar,  KaaS-Admin-Dashboard to Application server") {
+steps {
+   script {
+
+def remote = [:]
+                    remote.name = 'ec2-user'
+                    remote.host = '10.5.0.124'
+                    remote.allowAnyHosts = true
+                    withCredentials([sshUserPrivateKey(credentialsId: 'ES-KaaS-DEV', keyFileVariable: 'pemfile', usernameVariable: 'jenkins')]) {
+                        remote.user = jenkins
+                        remote.identityFile = pemfile
+sshPut remote: remote, from: "KaaS-Admin-Dashboard-${BUILD_NUMBER}/target/kaas-profile-services-0.0.1-SNAPSHOT.jar", into: "/home/ec2-user/admin-dashboard-mtp-jar"
+                    }
+}
+}
+}*/
+stage("copy Jar, from remote server to s3 bucket") {
+steps {
+   //dir("KaaS-Admin-Dashboard-${BUILD_NUMBER}/")
+       withAWS(credentials: 'aws-iam-credentials', region: 'us-east-1') {
+                       
+                        sh '''
+                       
+                         aws s3 cp $Jenkins_path/target/kaas-profile-services-0.0.1-SNAPSHOT.jar s3://kaas-udp/dev-build-files/
+
+'''
+               }
+}
+}
+ stage("copy jar, from s3 bucket to application server") {
+  steps {
+    script {
+                    def remote = [:]
+                    remote.name = 'ec2-user'
+                    remote.host = '10.5.0.124'
+                    remote.allowAnyHosts = true
+                    withCredentials([sshUserPrivateKey(credentialsId: '/home/ec2-user/UDP-KAAS-ITG1', keyFileVariable: 'pemfile', usernameVariable: 'jenkins')] {
+                        remote.user = jenkins
+                        remote.identityFile = pemfile
+
+sshCommand remote: remote, command: "aws s3 cp s3://kaas-udp/dev-build-files/kaas-profile-services-0.0.1-SNAPSHOT.jar /home/ec2-user/kaas-addmin-dev/"
+
+}
+}
+}
+}
+       }
+   }
